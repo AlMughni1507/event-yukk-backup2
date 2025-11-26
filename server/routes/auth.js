@@ -150,13 +150,15 @@ router.post('/register', validateUserRegistration, handleValidationErrors, async
 
     // 🔥 FIX: Send email in background (non-blocking) to prevent timeout
     // Return response immediately, email will be sent asynchronously
-    console.log(`📧 Queueing OTP email to ${finalEmail}...`);
+    // Use original email for sending (not normalized) so user receives email at the address they entered
+    const emailToSend = email.toLowerCase().trim(); // Use original email, just lowercase and trim
+    console.log(`📧 Queueing OTP email to ${emailToSend}...`);
     
     // Send email asynchronously (don't await)
-    emailService.sendOTPEmail(finalEmail, otpCode, full_name)
+    emailService.sendOTPEmail(emailToSend, otpCode, full_name)
       .then((emailSent) => {
         if (emailSent.success) {
-          console.log(`✅ OTP email sent successfully to ${finalEmail}`);
+          console.log(`✅ OTP email sent successfully to ${emailToSend}`);
         } else {
           console.error('❌ Failed to send OTP email:', emailSent.message);
           console.warn('⚠️ Email sending failed, but user registration is complete');

@@ -1873,24 +1873,10 @@ const EventsManagement = () => {
                         className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                         placeholder="Contoh: 50000"
                       />
-                      <p className="text-xs text-gray-500 mt-1">Masukkan harga tiket dalam Rupiah</p>
-                      
-                      {/* Tiered price preview - Only show if not free */}
-                      <div className="mt-4 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4">
-                        <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                          <span>💰</span> Tingkat Harga
-                        </p>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-sm bg-white/50 rounded px-3 py-2">
-                            <span className="text-gray-700">Reguler</span>
-                            <span className="font-bold text-blue-600">Rp {(Number(formData.registration_fee) || 0).toLocaleString('id-ID')}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-sm bg-white/50 rounded px-3 py-2">
-                            <span className="text-gray-700">Premium (+15%)</span>
-                            <span className="font-bold text-purple-600">Rp {Math.round((Number(formData.registration_fee) || 0) * 1.15).toLocaleString('id-ID')}</span>
-                          </div>
-                        </div>
-                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Masukkan harga tiket dalam Rupiah (harga normal yang akan
+                        digunakan untuk semua peserta)
+                      </p>
                     </>
                   )}
                   

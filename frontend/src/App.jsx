@@ -13,6 +13,7 @@ import CreateEvent from './pages/events/CreateEvent';
 import EventDashboard from './pages/events/EventDashboard';
 import LoginPage from './pages/auth/Login';
 import RegisterPage from './pages/auth/Register';
+import ResetPasswordPage from './pages/auth/ResetPassword';
 import ContactPage from './pages/contact/ContactPage';
 import BlogPage from './pages/blog/BlogPage';
 import ArticleDetailPage from './pages/blog/ArticleDetailPage';
@@ -41,6 +42,7 @@ import BlogManagement from './pages/admin/BlogManagement';
 import ReviewsManagement from './pages/admin/ReviewsManagement';
 import ReportsManagement from './pages/admin/ReportsManagement';
 import ContactManagement from './pages/admin/ContactManagement';
+import PaymentsManagement from './pages/admin/PaymentsManagement';
 
 // CSS files are now imported in main.jsx
 
@@ -115,6 +117,7 @@ const AnimatedRoutes = () => {
           <Route path="/events/:id" element={<PageTransition><EventDetail /></PageTransition>} />
           <Route path="/login" element={<PageTransition><LoginPage /></PageTransition>} />
           <Route path="/register" element={<PageTransition><RegisterPage /></PageTransition>} />
+          <Route path="/reset-password" element={<PageTransition><ResetPasswordPage /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><ContactPage /></PageTransition>} />
           <Route path="/blog" element={<PageTransition><BlogPage /></PageTransition>} />
           <Route path="/blog/:slug" element={<PageTransition><ArticleDetailPage /></PageTransition>} />
@@ -143,6 +146,7 @@ const AnimatedRoutes = () => {
             <Route path="reviews" element={<ReviewsManagement />} />
             <Route path="reports" element={<ReportsManagement />} />
             <Route path="contacts" element={<ContactManagement />} />
+            <Route path="payments" element={<PaymentsManagement />} />
           </Route>
             
           {/* Redirect any unknown routes to home */}

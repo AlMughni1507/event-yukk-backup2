@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import Footer from '../../components/Footer';
 import { Star, Send, ArrowLeft, Sparkles, TrendingUp, Award, MessageSquare, Quote } from 'lucide-react';
-import { reviewsAPI } from '../../services/api';
+import { reviewsAPI, registrationsAPI, eventReviewsAPI } from '../../services/api';
 
 const ReviewsPage = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuth();
+  const location = useLocation();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const toast = useToast();
   
   const [reviews, setReviews] = useState([]);
@@ -16,6 +17,10 @@ const ReviewsPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [existingReview, setExistingReview] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [mode, setMode] = useState('platform'); // 'platform' | 'event'
+  const [userEvents, setUserEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState('');
   
   const [formData, setFormData] = useState({
     rating: 5,
@@ -23,14 +28,31 @@ const ReviewsPage = () => {
     full_name: user?.full_name || ''
   });
 
+  // Inisialisasi mode & event dari navigation state (misal dari EventDetail)
   useEffect(() => {
+    if (location.state) {
+      const { mode: initialMode, eventId } = location.state;
+      if (initialMode === 'event') {
+        setMode('event');
+        if (eventId) {
+          setSelectedEventId(String(eventId));
+        }
+      }
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    if (isLoading) return;
+
     if (!isAuthenticated) {
       toast.warning('Anda harus login terlebih dahulu untuk memberikan ulasan');
       navigate('/login');
       return;
     }
+
     fetchReviews();
-  }, [isAuthenticated, user]);
+    fetchUserEvents();
+  }, [isLoading, isAuthenticated, user]);
 
   // Update form data when user changes
   useEffect(() => {
@@ -41,6 +63,24 @@ const ReviewsPage = () => {
       }));
     }
   }, [user, existingReview]);
+
+  const fetchUserEvents = async () => {
+    try {
+      setEventsLoading(true);
+      const response = await registrationsAPI.myRegistrations({ status: '' });
+      const regs = response?.registrations || response?.data?.registrations || [];
+      // Filter hanya event yang status registrasinya sudah approved/confirmed/attended
+      const eligible = regs.filter((r) =>
+        ['approved', 'confirmed', 'attended'].includes(r.status)
+      );
+      setUserEvents(eligible);
+    } catch (error) {
+      console.error('Error fetching user events for reviews:', error);
+      setUserEvents([]);
+    } finally {
+      setEventsLoading(false);
+    }
+  };
 
   const fetchReviews = async () => {
     try {
@@ -95,47 +135,73 @@ const ReviewsPage = () => {
       return;
     }
 
+    // Mode ulasan event: user harus memilih event terlebih dahulu
+    if (mode === 'event') {
+      if (!selectedEventId) {
+        toast.error('Silakan pilih event yang ingin Anda ulas');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
-      const payload = {
-        rating: formData.rating,
-        comment: formData.comment.trim(),
-        full_name: formData.full_name.trim(),
-        user_id: user.id
-      };
+      if (mode === 'platform') {
+        const payload = {
+          rating: formData.rating,
+          comment: formData.comment.trim(),
+          full_name: formData.full_name.trim(),
+          user_id: user.id
+        };
 
-      let response;
-      if (existingReview) {
-        // Update existing review
-        response = await reviewsAPI.update(existingReview.id, payload);
-        toast.success('Ulasan berhasil diperbarui! Terima kasih atas feedback Anda');
-        setExistingReview(null); // Reset to allow refresh
+        let response;
+        if (existingReview) {
+          // Update existing review
+          response = await reviewsAPI.update(existingReview.id, payload);
+          toast.success('Ulasan berhasil diperbarui! Terima kasih atas feedback Anda');
+          setExistingReview(null); // Reset to allow refresh
+        } else {
+          // Create new review
+          response = await reviewsAPI.create(payload);
+          toast.success('Ulasan berhasil dikirim! Ulasan akan tampil setelah disetujui admin.');
+        }
+        
+        // Reset form
+        setFormData({
+          rating: 5,
+          comment: '',
+          full_name: user?.full_name || ''
+        });
+        
+        // Refresh reviews after a short delay to ensure backend has processed
+        setTimeout(async () => {
+          await fetchReviews();
+        }, 500);
+        setIsEditing(false);
       } else {
-        // Create new review
-        response = await reviewsAPI.create(payload);
-        toast.success('Ulasan berhasil dikirim! Ulasan akan tampil setelah disetujui admin.');
+        // Mode ulasan event: kirim ke eventReviewsAPI
+        const payload = {
+          rating: formData.rating,
+          comment: formData.comment.trim(),
+        };
+
+        await eventReviewsAPI.submit(selectedEventId, payload);
+        toast.success('Ulasan event berhasil disimpan!');
+
+        // Reset form tapi tetap biarkan event terpilih
+        setFormData({
+          rating: 5,
+          comment: '',
+          full_name: user?.full_name || ''
+        });
       }
-      
-      // Reset form
-      setFormData({
-        rating: 5,
-        comment: '',
-        full_name: user?.full_name || ''
-      });
-      
-      // Refresh reviews after a short delay to ensure backend has processed
-      setTimeout(async () => {
-        await fetchReviews();
-      }, 500);
-      setIsEditing(false);
     } catch (error) {
       console.error('Error submitting review:', error);
-      const errorMessage = error?.message || error?.error || error?.data?.message || 'Gagal mengirim ulasan. Silakan coba lagi';
+      const raw = error?.data || error;
+      const errorMessage = raw?.message || raw?.error || raw?.msg || 'Gagal mengirim ulasan. Silakan coba lagi';
       
-      // Check if user already submitted a review
-      if (errorMessage.toLowerCase().includes('already') || errorMessage.toLowerCase().includes('sudah')) {
+      // Check if user already submitted a platform review
+      if (mode === 'platform' && (errorMessage.toLowerCase().includes('already') || errorMessage.toLowerCase().includes('sudah'))) {
         toast.error('Anda sudah pernah memberikan ulasan. Silakan edit ulasan yang sudah ada.');
-        // Fetch reviews to get existing review
         await fetchReviews();
       } else {
         toast.error(errorMessage);
@@ -273,7 +339,33 @@ const ReviewsPage = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
             {/* Form */}
             <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-200">
-              <h2 className="font-bebas text-3xl text-gray-900 mb-6">Tulis Ulasan Anda</h2>
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                <h2 className="font-bebas text-3xl text-gray-900">Tulis Ulasan Anda</h2>
+                <div className="inline-flex rounded-full bg-gray-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode('platform')}
+                    className={`px-4 py-1.5 text-sm font-poppins rounded-full transition-all ${
+                      mode === 'platform'
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'text-gray-600 hover:bg-white'
+                    }`}
+                  >
+                    Ulasan Platform
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('event')}
+                    className={`px-4 py-1.5 text-sm font-poppins rounded-full transition-all ${
+                      mode === 'event'
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'text-gray-600 hover:bg-white'
+                    }`}
+                  >
+                    Ulasan Event
+                  </button>
+                </div>
+              </div>
               
               {/* Existing Review Notice */}
               {existingReview && (
@@ -286,6 +378,41 @@ const ReviewsPage = () => {
                         Anda dapat mengedit ulasan Anda di bawah ini. Perubahan akan langsung tersimpan.
                       </p>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {mode === 'event' && (
+                <div className="mb-6 p-4 bg-purple-50 border-l-4 border-purple-500 rounded-lg">
+                  <p className="text-sm text-purple-900 font-poppins font-semibold mb-2">
+                    Ulasan Event yang Pernah Anda Ikuti
+                  </p>
+                  <p className="text-xs text-purple-800 font-poppins mb-3">
+                    Pilih event yang pernah Anda ikuti, kemudian berikan rating dan komentar.
+                  </p>
+                  <div className="mt-2">
+                    <label className="block text-xs font-poppins font-semibold text-gray-700 mb-1">
+                      Pilih Event
+                    </label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent font-poppins text-sm bg-white"
+                      value={selectedEventId}
+                      onChange={(e) => setSelectedEventId(e.target.value)}
+                      disabled={eventsLoading || userEvents.length === 0}
+                    >
+                      <option value="">
+                        {eventsLoading
+                          ? 'Memuat event...'
+                          : userEvents.length === 0
+                          ? 'Belum ada event yang bisa diulas'
+                          : 'Pilih event yang ingin Anda ulas'}
+                      </option>
+                      {userEvents.map((reg) => (
+                        <option key={reg.id} value={reg.event_id}>
+                          {reg.event_title || `Event #${reg.event_id}`} - {reg.status}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               )}

@@ -115,13 +115,20 @@ const LoginPage = () => {
     
     try {
       const response = await authAPI.requestPasswordReset({ email: resetEmail });
-      if (response && response.success) {
-        setSuccess('Password reset link has been sent to your email');
+
+      // Backend selalu mengembalikan success, tapi tidak mengungkap apakah email terdaftar
+      if (response && response.data) {
+        setSuccess('Kode reset password telah dikirim ke email (jika terdaftar).');
+
+        // Arahkan user ke halaman reset password dengan membawa email
         setShowResetModal(false);
+        const emailForReset = resetEmail;
         setResetEmail('');
+        navigate('/reset-password', { state: { email: emailForReset } });
       }
     } catch (error) {
-      setError(error.message || 'Failed to send password reset email');
+      const backendMessage = error?.response?.data?.message;
+      setError(backendMessage || error.message || 'Failed to send password reset email');
     } finally {
       setResetLoading(false);
     }

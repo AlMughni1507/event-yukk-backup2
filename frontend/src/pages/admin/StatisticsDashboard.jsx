@@ -30,10 +30,20 @@ const StatisticsDashboard = () => {
 
       // Response interceptor returns response.data which is { success, message, data }
       // So we need to access .data.monthlyEvents
+      const monthlyEvents = monthlyEventsRes?.data?.monthlyEvents || monthlyEventsRes?.monthlyEvents || [];
+      const monthlyParticipants = monthlyParticipantsRes?.data?.monthlyParticipants || monthlyParticipantsRes?.monthlyParticipants || [];
+      const topEvents = topEventsRes?.data?.topEvents || topEventsRes?.topEvents || [];
+
+      console.log('📊 Statistics data loaded:', {
+        monthlyEvents: monthlyEvents.length,
+        monthlyParticipants: monthlyParticipants.length,
+        topEvents: topEvents.length
+      });
+
       setStatistics({
-        monthlyEvents: monthlyEventsRes?.data?.monthlyEvents || [],
-        monthlyParticipants: monthlyParticipantsRes?.data?.monthlyParticipants || [],
-        topEvents: topEventsRes?.data?.topEvents || []
+        monthlyEvents: Array.isArray(monthlyEvents) ? monthlyEvents : [],
+        monthlyParticipants: Array.isArray(monthlyParticipants) ? monthlyParticipants : [],
+        topEvents: Array.isArray(topEvents) ? topEvents : []
       });
     } catch (error) {
       console.error('Error fetching statistics:', error);

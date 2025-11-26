@@ -39,8 +39,8 @@ const ContactPage = () => {
     setMessage('');
 
     try {
-      // Use the contact endpoint that saves to database
-      const response = await api.post('/contact', {
+      // Gunakan endpoint /contacts yang menyimpan ke DB dan mengirim notifikasi email ke admin
+      const response = await api.post('/contacts', {
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
@@ -48,10 +48,15 @@ const ContactPage = () => {
         message: formData.message
       });
 
-      const data = response.data || response;
+      // Axios interceptor sudah mengembalikan object { success, data, message }
+      const success = response?.success ?? true;
+      const msg = response?.message;
 
-      if (data.success) {
-        setMessage('✅ Pesan berhasil dikirim! Admin akan segera merespons pesan Anda.');
+      if (success) {
+        setMessage(
+          msg ||
+            '✅ Pesan berhasil dikirim! Admin akan segera merespons pesan Anda lewat email.'
+        );
         setFormData({
           name: '',
           email: '',
@@ -63,7 +68,9 @@ const ContactPage = () => {
         // Auto hide success message after 5 seconds
         setTimeout(() => setMessage(''), 5000);
       } else {
-        setMessage('❌ ' + (data.message || 'Gagal mengirim pesan. Silakan coba lagi.'));
+        setMessage(
+          '❌ ' + (msg || 'Gagal mengirim pesan. Silakan coba lagi.')
+        );
       }
     } catch (error) {
       console.error('Contact form error:', error);

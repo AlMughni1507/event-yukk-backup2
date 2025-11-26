@@ -1,35 +1,120 @@
 const Brevo = require('@getbrevo/brevo');
+const nodemailer = require('nodemailer');
 const { query } = require('../db');
 
 class EmailService {
   constructor() {
-    this.senderEmail = process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER;
-    this.senderName = process.env.BREVO_SENDER_NAME || process.env.SMTP_FROM_NAME || 'Event Yukk Platform';
-    this.apiKey = process.env.BREVO_API_KEY;
+    // Brevo Configuration
+    this.brevoSenderEmail = process.env.BREVO_SENDER_EMAIL;
+    this.brevoSenderName = process.env.BREVO_SENDER_NAME || 'Event Yukk Platform';
+    this.brevoApiKey = process.env.BREVO_API_KEY;
+    this.brevoConfigured = Boolean(this.brevoApiKey && this.brevoSenderEmail && 
+      !this.brevoApiKey.includes('your-') && !this.brevoSenderEmail.includes('example.com'));
 
-    this.isConfigured = Boolean(this.apiKey && this.senderEmail);
+    // SMTP Configuration (Fallback)
+    this.smtpHost = process.env.SMTP_HOST;
+    this.smtpPort = parseInt(process.env.SMTP_PORT) || 587;
+    this.smtpSecure = process.env.SMTP_SECURE === 'true';
+    this.smtpUser = process.env.SMTP_USER;
+    // Trim password to remove any accidental spaces
+    this.smtpPass = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim().replace(/\s/g, '') : '';
+    this.smtpFromName = process.env.SMTP_FROM_NAME || 'Event Yukk Platform';
+    this.smtpFromEmail = process.env.SMTP_FROM_EMAIL || this.smtpUser;
+    
+    this.smtpConfigured = Boolean(this.smtpHost && this.smtpUser && this.smtpPass);
+
+    // Determine sender email and name
+    this.senderEmail = this.brevoSenderEmail || this.smtpFromEmail;
+    this.senderName = this.brevoSenderName || this.smtpFromName;
 
     console.log('📧 EmailService Configuration:');
-    console.log('   Provider : Brevo (Transactional Email API)');
-    console.log(`   Sender   : ${this.senderName} <${this.senderEmail}>`);
-    console.log(`   API Key  : ${this.apiKey ? '***configured***' : 'NOT SET'}`);
-    console.log(`   Is Ready : ${this.isConfigured}`);
-
-    if (this.isConfigured) {
-      this.emailApi = new Brevo.TransactionalEmailsApi();
-      if (
-        this.emailApi &&
-        this.emailApi.authentications &&
-        this.emailApi.authentications.apiKey
-      ) {
-        this.emailApi.authentications.apiKey.apiKey = this.apiKey;
-      } else if (this.emailApi && typeof this.emailApi.setApiKey === 'function') {
-        this.emailApi.setApiKey('apiKey', this.apiKey);
+    console.log('   Brevo API :', this.brevoConfigured ? '✅ Configured' : '❌ Not configured');
+    console.log('   SMTP      :', this.smtpConfigured ? '✅ Configured' : '❌ Not configured');
+    console.log(`   SMTP User : ${this.smtpUser || 'NOT SET'}`);
+    console.log(`   From Email: ${this.smtpFromEmail || 'NOT SET'}`);
+    console.log(`   Sender    : ${this.senderName} <${this.senderEmail}>`);
+    
+    // Verify email configuration
+    if (this.smtpConfigured && this.smtpFromEmail !== 'al.mughni845@gmail.com') {
+      console.warn(`⚠️  WARNING: SMTP_FROM_EMAIL is set to ${this.smtpFromEmail}, not al.mughni845@gmail.com`);
+    } else if (this.smtpConfigured && this.smtpFromEmail === 'al.mughni845@gmail.com') {
+      console.log('✅ Email sender confirmed: al.mughni845@gmail.com');
+    }
+    
+    // Initialize Brevo if configured
+    if (this.brevoConfigured) {
+      try {
+        this.emailApi = new Brevo.TransactionalEmailsApi();
+        if (
+          this.emailApi &&
+          this.emailApi.authentications &&
+          this.emailApi.authentications.apiKey
+        ) {
+          this.emailApi.authentications.apiKey.apiKey = this.brevoApiKey;
+        } else if (this.emailApi && typeof this.emailApi.setApiKey === 'function') {
+          this.emailApi.setApiKey('apiKey', this.brevoApiKey);
+        }
+        console.log('📧 Brevo transactional email client initialized');
+      } catch (error) {
+        console.warn('⚠️ Failed to initialize Brevo:', error.message);
+        this.emailApi = null;
       }
-      console.log('📧 Brevo transactional email client initialized');
     } else {
-      console.warn('❌ Brevo API key or sender email missing. Email features will log to console.');
       this.emailApi = null;
+    }
+
+    // Initialize SMTP transporter if configured
+    if (this.smtpConfigured) {
+      try {
+        // Password already trimmed in constructor, but ensure no spaces
+        const cleanPassword = this.smtpPass.replace(/\s/g, '');
+        
+        this.smtpTransporter = nodemailer.createTransport({
+          host: this.smtpHost,
+          port: this.smtpPort,
+          secure: this.smtpSecure,
+          auth: {
+            user: this.smtpUser,
+            pass: cleanPassword
+          },
+          // Add connection timeout
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 10000
+        });
+        
+        // Verify connection on startup
+        // DEBUG: Verify SMTP credentials being used
+        console.log('--- SMTP Auth Debug ---');
+        console.log(`   - User: ${this.smtpUser}`);
+        console.log(`   - Pass: ${this.smtpPass ? this.smtpPass.substring(0, 2) + '****' + this.smtpPass.substring(this.smtpPass.length - 2) : 'NOT SET'}`);
+        console.log('-------------------------');
+
+        this.smtpTransporter.verify((error, success) => {
+          if (error) {
+            console.warn('⚠️ SMTP connection verification failed:', error.message);
+            if (error.code === 'EAUTH') {
+              console.error('💡 SMTP Authentication Error!');
+              console.error('   Make sure you\'re using Gmail App Password (not regular password)');
+              console.error('   Get it from: https://myaccount.google.com/apppasswords');
+              console.error('   Ensure 2-Step Verification is enabled');
+            }
+          } else {
+            console.log('✅ SMTP connection verified successfully');
+          }
+        });
+        
+        console.log('📧 SMTP transporter initialized');
+      } catch (error) {
+        console.warn('⚠️ Failed to initialize SMTP:', error.message);
+        this.smtpTransporter = null;
+      }
+    } else {
+      this.smtpTransporter = null;
+    }
+
+    if (!this.brevoConfigured && !this.smtpConfigured) {
+      console.warn('❌ No email provider configured. Email features will log to console only.');
     }
   }
 
@@ -39,42 +124,121 @@ class EmailService {
         throw new Error('Recipient email is required');
       }
 
-      if (!this.isConfigured || !this.emailApi) {
-        console.warn('📨 Brevo not configured. Using fallback logging for email notification.');
-        console.log('----- EMAIL (FALLBACK) -----');
-        console.log('To      :', to);
-        console.log('Subject :', subject);
-        if (text) {
-          console.log('Text    :', text);
+      // Normalize recipient email (keep original for sending, but normalize for logging)
+      const recipientEmails = Array.isArray(to) ? to : [to];
+      const normalizedRecipients = recipientEmails.map(email => {
+        if (typeof email === 'string') {
+          return email.toLowerCase().trim();
         }
-        if (html) {
-          console.log('HTML    :', html.substring(0, 500) + (html.length > 500 ? '...' : ''));
+        return email.email ? email.email.toLowerCase().trim() : email;
+      });
+
+      // Try Brevo first if configured
+      if (this.brevoConfigured && this.emailApi) {
+        try {
+          const recipients = recipientEmails.map((recipient) => 
+            typeof recipient === 'string' ? { email: recipient } : recipient
+          );
+
+          const emailData = new Brevo.SendSmtpEmail();
+          emailData.sender = {
+            email: this.brevoSenderEmail,
+            name: this.brevoSenderName
+          };
+          emailData.to = recipients;
+          emailData.subject = subject;
+          if (html) {
+            emailData.htmlContent = html;
+          }
+          if (text) {
+            emailData.textContent = text;
+          }
+
+          const response = await this.emailApi.sendTransacEmail(emailData);
+          console.log(`📧 Email sent via Brevo to ${normalizedRecipients.join(', ')} (${response?.messageId || 'no-id'})`);
+          return { success: true, messageId: response?.messageId || null, provider: 'brevo' };
+        } catch (brevoError) {
+          console.warn('⚠️ Brevo send failed, falling back to SMTP:', brevoError.message);
+          // Fall through to SMTP
         }
-        console.log('----------------------------');
-        return { success: true, fallback: true };
       }
 
-      const recipients = Array.isArray(to)
-        ? to.map((recipient) => (typeof recipient === 'string' ? { email: recipient } : recipient))
-        : [{ email: to }];
+      // Try SMTP if configured
+      if (this.smtpConfigured && this.smtpTransporter) {
+        try {
+          // Ensure password is clean (no spaces)
+          const cleanPassword = this.smtpPass.replace(/\s/g, '');
+          
+          // Recreate transporter if password changed (shouldn't happen, but safety check)
+          if (cleanPassword !== this.smtpPass) {
+            this.smtpTransporter = nodemailer.createTransport({
+              host: this.smtpHost,
+              port: this.smtpPort,
+              secure: this.smtpSecure,
+              auth: {
+                user: this.smtpUser,
+                pass: cleanPassword
+              },
+              connectionTimeout: 10000,
+              greetingTimeout: 10000,
+              socketTimeout: 10000
+            });
+          }
 
-      const emailData = new Brevo.SendSmtpEmail();
-      emailData.sender = {
-        email: this.senderEmail,
-        name: this.senderName
-      };
-      emailData.to = recipients;
-      emailData.subject = subject;
-      if (html) {
-        emailData.htmlContent = html;
+          const mailOptions = {
+            from: `"${this.smtpFromName}" <${this.smtpUser}>`, // FIX: Always use SMTP_USER for the 'from' email to align with Gmail requirements
+            to: Array.isArray(to) ? to.join(', ') : to,
+            subject: subject,
+            text: text || '',
+            html: html || text || ''
+          };
+
+          // Improved logging for clarity
+          console.log(`📧 Preparing to send email via SMTP...`);
+          console.log(`   - From: "${this.smtpFromName}" <${this.smtpUser}>`);
+          console.log(`   - To: ${Array.isArray(to) ? to.join(', ') : to}`);
+          
+          const info = await this.smtpTransporter.sendMail(mailOptions);
+          console.log(`✅ Email sent via SMTP from ${this.smtpFromEmail} to ${normalizedRecipients.join(', ')} (${info.messageId || 'no-id'})`);
+          return { success: true, messageId: info.messageId || null, provider: 'smtp' };
+        } catch (smtpError) {
+          console.error('❌ SMTP send failed:', smtpError.message);
+          if (smtpError.code === 'EAUTH' || smtpError.responseCode === 535) {
+            console.error('💡 SMTP Authentication Error!');
+            console.error('   This usually means:');
+            console.error('   1. App Password is incorrect or expired');
+            console.error('   2. 2-Step Verification is not enabled');
+            console.error('   3. You\'re using regular password instead of App Password');
+            console.error('   Solution:');
+            console.error('   - Go to: https://myaccount.google.com/apppasswords');
+            console.error('   - Create a NEW App Password');
+            console.error('   - Copy the 16-character password (NO SPACES!)');
+            console.error('   - Update SMTP_PASS in config.env');
+            console.error('   - Restart server');
+          }
+          // Don't throw, return error object instead
+          return { 
+            success: false, 
+            message: smtpError.message || 'SMTP send failed',
+            error: smtpError.code || 'SMTP_ERROR',
+            provider: 'smtp'
+          };
+        }
       }
+
+      // Fallback: log to console
+      console.warn('📨 No email provider configured. Using fallback logging for email notification.');
+      console.log('----- EMAIL (FALLBACK) -----');
+      console.log('To      :', normalizedRecipients.join(', '));
+      console.log('Subject :', subject);
       if (text) {
-        emailData.textContent = text;
+        console.log('Text    :', text);
       }
-
-      const response = await this.emailApi.sendTransacEmail(emailData);
-      console.log(`📧 Email sent via Brevo to ${Array.isArray(to) ? to.join(', ') : to} (${response?.messageId || 'no-id'})`);
-      return { success: true, messageId: response?.messageId || null };
+      if (html) {
+        console.log('HTML    :', html.substring(0, 500) + (html.length > 500 ? '...' : ''));
+      }
+      console.log('----------------------------');
+      return { success: true, fallback: true, provider: 'console' };
     } catch (error) {
       console.error('❌ sendEmail error:', error);
       return { success: false, message: error.message || 'Failed to send email' };

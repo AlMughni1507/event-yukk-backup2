@@ -858,5 +858,55 @@ router.post('/test-token', async (req, res) => {
   }
 });
 
+// Delete registration (admin only)
+router.delete('/:id', requireUser, async (req, res) => {
+  try {
+    const { id } = req.params; // This is event_registrations.id
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isAdmin) {
+      return ApiResponse.forbidden(res, 'You are not authorized to delete registrations.');
+    }
+
+    // First, get the details of the registration to be deleted
+    const [eventRegs] = await query(
+      'SELECT user_id, event_id FROM event_registrations WHERE id = ?',
+      [id]
+    );
+
+    if (eventRegs.length === 0) {
+      return ApiResponse.notFound(res, 'Event registration not found');
+    }
+
+    const { user_id, event_id } = eventRegs[0];
+
+    // Find the corresponding legacy registration to get its ID
+    const [legacyRegs] = await query(
+      'SELECT id FROM registrations WHERE user_id = ? AND event_id = ?',
+      [user_id, event_id]
+    );
+
+    if (legacyRegs.length > 0) {
+      const primaryRegistrationId = legacyRegs[0].id;
+
+      // Delete associated data first to avoid foreign key constraints
+      await query('DELETE FROM attendance_tokens WHERE registration_id = ?', [primaryRegistrationId]);
+      await query('DELETE FROM payments WHERE registration_id = ?', [primaryRegistrationId]);
+      
+      // Delete from the legacy registrations table
+      await query('DELETE FROM registrations WHERE id = ?', [primaryRegistrationId]);
+    }
+
+    // Finally, delete from the main event_registrations table
+    await query('DELETE FROM event_registrations WHERE id = ?', [id]);
+
+    return ApiResponse.success(res, null, 'Registration deleted successfully');
+
+  } catch (error) {
+    console.error('Delete registration error:', error);
+    return ApiResponse.error(res, 'Failed to delete registration');
+  }
+});
+
 module.exports = router;
 

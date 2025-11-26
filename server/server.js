@@ -190,6 +190,7 @@ const routes = [
   { path: '/api/certificates', module: './routes/certificates', name: 'certificates' },
   { path: '/api/performers', module: './routes/performers', name: 'performers' },
   { path: '/api/reviews', module: './routes/reviews', name: 'reviews' },
+  { path: '/api/event-reviews', module: './routes/eventReviews', name: 'eventReviews' },
   { path: '/api/admin/reports', module: './routes/reports', name: 'reports' }
 ];
 

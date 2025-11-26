@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api, { BACKEND_BASE_URL } from '../../services/api';
+import { performersAPI, eventReviewsAPI, registrationsAPI } from '../../services/api';
 import Footer from '../../components/Footer';
 import { ArrowLeft, Calendar, MapPin, Clock, ChevronDown, ChevronUp, Instagram, Facebook, Youtube, Twitter } from 'lucide-react';
 
@@ -13,6 +14,10 @@ const EventDetailModern = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showFullDescription, setShowFullDescription] = useState(false);
+  const [performers, setPerformers] = useState([]);
+  const [eventReviews, setEventReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [canReview, setCanReview] = useState(false);
 
   useEffect(() => {
     fetchEvent();
@@ -31,6 +36,43 @@ const EventDetailModern = () => {
       setLoading(false);
     }
   };
+
+  const fetchEventReviews = async () => {
+    try {
+      setReviewsLoading(true);
+      const response = await eventReviewsAPI.getByEvent(id);
+      const list = response?.reviews || response?.data?.reviews || [];
+      setEventReviews(Array.isArray(list) ? list : []);
+    } catch (error) {
+      console.error('Error fetching event reviews:', error);
+      setEventReviews([]);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
+  const checkUserRegistration = async () => {
+    try {
+      const response = await registrationsAPI.checkForEvent(id);
+      const data = response?.data || response;
+      setCanReview(Boolean(data?.is_registered));
+    } catch (error) {
+      console.error('Error checking registration for review:', error);
+      setCanReview(false);
+    }
+  };
+
+  useEffect(() => {
+    if (event && event.id) {
+      fetchPerformers();
+      fetchEventReviews();
+      if (isAuthenticated) {
+        checkUserRegistration();
+      } else {
+        setCanReview(false);
+      }
+    }
+  }, [event, id, isAuthenticated]);
 
   const formatDate = (dateString) => {
     if (!dateString) return 'TBA';
@@ -67,6 +109,17 @@ const EventDetailModern = () => {
       return;
     }
     navigate(`/register-event/${id}`);
+  };
+
+  const fetchPerformers = async () => {
+    try {
+      const response = await performersAPI.getByEvent(id);
+      const performersData = response?.performers || response?.data?.performers || [];
+      setPerformers(Array.isArray(performersData) ? performersData : []);
+    } catch (error) {
+      console.error('Error fetching performers:', error);
+      setPerformers([]);
+    }
   };
 
   if (loading) {
@@ -179,19 +232,100 @@ const EventDetailModern = () => {
               </div>
             )}
 
-            {/* Lineup Section */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Lineup</h2>
-              <div className="flex items-center justify-center py-8 text-gray-400">
-                <div className="text-center">
-                  <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                    <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                  </div>
-                  <p className="text-sm font-medium">Belum Ada Lineup</p>
-                </div>
+            {/* Event Reviews Section */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
+              <div className="flex items-center justify-between gap-4 mb-2">
+                <h2 className="text-xl font-bold text-gray-900">Ulasan Peserta</h2>
+                {isAuthenticated && canReview && (
+                  <button
+                    onClick={() =>
+                      navigate('/reviews', {
+                        state: { mode: 'event', eventId: id, eventTitle: event.title },
+                      })
+                    }
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm"
+                  >
+                    Tulis Ulasan Event Ini
+                  </button>
+                )}
               </div>
+
+              {reviewsLoading ? (
+                <p className="text-sm text-gray-500">Memuat ulasan...</p>
+              ) : eventReviews.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  Belum ada ulasan untuk event ini. Jadilah yang pertama memberikan ulasan setelah mengikuti event.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {eventReviews.slice(0, 5).map((rev) => (
+                    <div
+                      key={rev.id}
+                      className="border border-gray-200 rounded-lg p-4 bg-gray-50"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {rev.full_name || rev.username || 'Peserta'}
+                        </p>
+                        <span className="text-xs text-gray-500">
+                          {new Date(rev.created_at).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 mb-2">
+                        {Array.from({ length: 5 }).map((_, idx) => (
+                          <span
+                            key={idx}
+                            className={
+                              idx < rev.rating
+                                ? 'text-yellow-400 text-sm'
+                                : 'text-gray-300 text-sm'
+                            }
+                          >
+                            ★
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-sm text-gray-700 leading-relaxed">{rev.comment}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Lineup Section */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
+              <h2 className="text-xl font-bold text-gray-900">Lineup</h2>
+              {performers.length === 0 ? (
+                <p className="text-sm text-gray-600">Lineup belum diisi. Silakan kembali nanti.</p>
+              ) : (
+                <div className="space-y-3">
+                  {performers.map((performer) => (
+                    <div key={performer.id} className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center">
+                        {performer.photo_url ? (
+                          <img
+                            src={`${BACKEND_BASE_URL}${performer.photo_url}`}
+                            alt={performer.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-base font-semibold text-gray-900">{performer.name}</p>
+                        <p className="text-xs text-gray-500">Pengisi acara</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

@@ -145,7 +145,7 @@ router.get('/monthly-events', authenticateToken, requireAdmin, async (req, res) 
   try {
     const { year = new Date().getFullYear() } = req.query;
     
-    const monthlyEvents = await query(`
+    const [monthlyEvents] = await query(`
       SELECT 
         MONTH(event_date) as month,
         MONTHNAME(event_date) as month_name,
@@ -167,7 +167,7 @@ router.get('/monthly-events', authenticateToken, requireAdmin, async (req, res) 
       return {
         month: index + 1,
         month_name: monthName,
-        total_events: found ? found.total_events : 0
+        total_events: found ? parseInt(found.total_events) || 0 : 0
       };
     });
 
@@ -179,22 +179,21 @@ router.get('/monthly-events', authenticateToken, requireAdmin, async (req, res) 
   }
 });
 
-// Get monthly participants statistics (from attendance records)
+// Get monthly participants statistics (from event_registrations)
 router.get('/monthly-participants', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { year = new Date().getFullYear() } = req.query;
     
-    const monthlyParticipants = await query(`
+    const [monthlyParticipants] = await query(`
       SELECT 
         MONTH(e.event_date) as month,
         MONTHNAME(e.event_date) as month_name,
-        COUNT(r.id) as total_participants
+        COUNT(er.id) as total_participants
       FROM events e
-      LEFT JOIN registrations r ON e.id = r.event_id 
+      LEFT JOIN event_registrations er ON e.id = er.event_id
       WHERE YEAR(e.event_date) = ? 
+        AND er.status NOT IN ('rejected', 'cancelled') 
         AND e.status = 'published'
-        AND r.status = 'approved'
-        AND r.attendance_status = 'present'
       GROUP BY MONTH(e.event_date), MONTHNAME(e.event_date)
       ORDER BY MONTH(e.event_date)
     `, [year]);
@@ -210,7 +209,7 @@ router.get('/monthly-participants', authenticateToken, requireAdmin, async (req,
       return {
         month: index + 1,
         month_name: monthName,
-        total_participants: found ? found.total_participants : 0
+        total_participants: found ? parseInt(found.total_participants) || 0 : 0
       };
     });
 
@@ -225,25 +224,29 @@ router.get('/monthly-participants', authenticateToken, requireAdmin, async (req,
 // Get top 10 events by participant count
 router.get('/top-events', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const topEvents = await query(`
+    const [topEvents] = await query(`
       SELECT 
         e.id,
         e.title,
         e.event_date,
         c.name as category_name,
-        COUNT(r.id) as participant_count
+        COUNT(er.id) as participant_count
       FROM events e
-      LEFT JOIN registrations r ON e.id = r.event_id 
-        AND r.status = 'approved' 
-        AND r.attendance_status = 'present'
+      LEFT JOIN event_registrations er ON e.id = er.event_id
       LEFT JOIN categories c ON e.category_id = c.id
-      WHERE e.status = 'published'
+      WHERE e.status = 'published' AND er.status NOT IN ('rejected', 'cancelled')
       GROUP BY e.id, e.title, e.event_date, c.name
       ORDER BY participant_count DESC
       LIMIT 10
     `);
 
-    return ApiResponse.success(res, { topEvents });
+    // Ensure participant_count is integer
+    const formattedTopEvents = topEvents.map(event => ({
+      ...event,
+      participant_count: parseInt(event.participant_count) || 0
+    }));
+
+    return ApiResponse.success(res, { topEvents: formattedTopEvents });
 
   } catch (error) {
     console.error('Top events error:', error);

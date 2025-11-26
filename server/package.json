@@ -9,7 +9,10 @@
     "dev": "nodemon server.js",
     "create-db": "node create-database.js",
     "migrate": "node migrations/runMigration.js",
-    "setup": "npm run create-db && npm run migrate"
+    "setup": "npm run create-db && npm run migrate",
+    "test:email": "node test-email-smtp.js",
+    "test:otp": "node test-otp-email.js",
+    "test:otp-from": "node test-otp-from-email.js"
   },
   "keywords": [],
   "author": "",

@@ -8,13 +8,17 @@ const router = express.Router();
 
 // Initialize Midtrans Snap
 // ⚠️ FIX: Check if we're in production or development
+// Production keys start with "Mid-server-" or "Mid-client-"
+// Sandbox keys start with "SB-Mid-server" or "SB-Mid-client" or "Mid-server-" (new format)
 const isProduction = process.env.NODE_ENV === 'production' && 
                      process.env.MIDTRANS_SERVER_KEY && 
-                     !process.env.MIDTRANS_SERVER_KEY.includes('SB-Mid-server');
+                     !process.env.MIDTRANS_SERVER_KEY.includes('SB-Mid-server') &&
+                     !process.env.MIDTRANS_SERVER_KEY.includes('Mid-server-U'); // User's sandbox key pattern
+
 const snap = new midtransClient.Snap({
   isProduction: isProduction,
-  serverKey: process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-your-server-key-here',
-  clientKey: process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-your-client-key-here'
+  serverKey: process.env.MIDTRANS_SERVER_KEY || 'Mid-server-U3uWmOllZ_9x58IMuxkaUQK2',
+  clientKey: process.env.MIDTRANS_CLIENT_KEY || 'Mid-client-nvTDykDDeGssFvsV'
 });
 
 console.log('💳 Midtrans initialized:', {
@@ -146,18 +150,23 @@ router.post('/create-transaction', authenticateToken, requireUser, async (req, r
     console.log('✅ Midtrans token created:', token);
 
     // Save payment record
+    let paymentId;
     if (existingPayments.length > 0) {
       // Update existing payment
+      paymentId = existingPayments[0].id;
       await query(
         'UPDATE payments SET order_id = ?, midtrans_token = ?, amount = ?, status = "pending", updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [orderId, token, amount, existingPayments[0].id]
+        [orderId, token, amount, paymentId]
       );
+      console.log('✅ Updated existing payment record:', paymentId);
     } else {
       // Create new payment record
-      await query(
+      const [insertResult] = await query(
         'INSERT INTO payments (registration_id, order_id, amount, payment_method, status, midtrans_token) VALUES (?, ?, ?, ?, ?, ?)',
         [registrationId, orderId, amount, 'midtrans', 'pending', token]
       );
+      paymentId = insertResult.insertId;
+      console.log('✅ Created new payment record:', paymentId, 'Order ID:', orderId);
     }
 
     return ApiResponse.success(res, {
@@ -346,9 +355,12 @@ router.post('/verify/:orderId', authenticateToken, requireUser, async (req, res)
   try {
     const { orderId } = req.params;
 
-    // Get payment record
+    // Get payment record with registration info
     const [payments] = await query(
-      'SELECT * FROM payments WHERE order_id = ?',
+      `SELECT p.*, er.user_id, er.event_id 
+       FROM payments p
+       LEFT JOIN event_registrations er ON p.registration_id = er.id
+       WHERE p.order_id = ?`,
       [orderId]
     );
 
@@ -359,8 +371,12 @@ router.post('/verify/:orderId', authenticateToken, requireUser, async (req, res)
     const payment = payments[0];
 
     // Verify with Midtrans Core API
+    const isProduction = process.env.NODE_ENV === 'production' && 
+                         process.env.MIDTRANS_SERVER_KEY && 
+                         !process.env.MIDTRANS_SERVER_KEY.includes('SB-Mid-server') &&
+                         !process.env.MIDTRANS_SERVER_KEY.includes('Mid-server-');
     const coreApi = new midtransClient.CoreApi({
-      isProduction: false,
+      isProduction: isProduction,
       serverKey: process.env.MIDTRANS_SERVER_KEY
     });
 
@@ -384,10 +400,57 @@ router.post('/verify/:orderId', authenticateToken, requireUser, async (req, res)
 
     // Update registration if payment successful
     if (paymentStatus === 'success') {
-      await query(
-        'UPDATE event_registrations SET status = "confirmed", payment_status = "paid" WHERE id = ?',
+      // Get registration info first
+      const [registrationInfo] = await query(
+        'SELECT user_id, event_id FROM event_registrations WHERE id = ?',
         [payment.registration_id]
       );
+
+      if (registrationInfo.length > 0) {
+        const regInfo = registrationInfo[0];
+        
+        // Update event_registrations
+        await query(
+          'UPDATE event_registrations SET status = "confirmed", payment_status = "paid", updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [payment.registration_id]
+        );
+
+        // Update registrations (legacy table) if exists
+        try {
+          await query(
+            'UPDATE registrations SET status = "confirmed", payment_status = "paid", updated_at = CURRENT_TIMESTAMP WHERE event_id = ? AND user_id = ?',
+            [regInfo.event_id, regInfo.user_id]
+          );
+        } catch (err) {
+          console.warn('⚠️ Could not update legacy registrations table:', err.message);
+        }
+
+        // Generate attendance token for paid event
+        try {
+          const TokenService = require('../services/tokenService');
+          const tokenData = await TokenService.createAttendanceToken(
+            payment.registration_id,
+            regInfo.user_id,
+            regInfo.event_id
+          );
+
+          // Get user email
+          const [users] = await query('SELECT email, full_name FROM users WHERE id = ?', [regInfo.user_id]);
+          if (users.length > 0) {
+            await TokenService.sendTokenEmail(
+              users[0].email,
+              users[0].full_name,
+              'Event Registration',
+              tokenData.token
+            );
+          }
+        } catch (tokenError) {
+          console.error('❌ Failed to generate token:', tokenError);
+          // Don't fail the payment update
+        }
+
+        console.log('✅ Registration confirmed for order:', orderId);
+      }
     }
 
     return ApiResponse.success(res, {

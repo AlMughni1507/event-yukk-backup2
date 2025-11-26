@@ -21,6 +21,17 @@ const PaymentSuccessPage = () => {
 
   const verifyPayment = async () => {
     try {
+      // First, verify payment status from Midtrans directly
+      // This ensures we get the latest status even if webhook didn't fire
+      try {
+        await api.post(`/payments/verify/${orderId}`);
+        console.log('✅ Payment verified from Midtrans');
+      } catch (verifyError) {
+        console.warn('⚠️ Verification from Midtrans failed, using database status:', verifyError);
+        // Continue to fetch from database even if verification fails
+      }
+      
+      // Then fetch updated status from database
       const response = await api.get(`/payments/status/${orderId}`);
       const data = response?.data || response;
       setPaymentData(data);

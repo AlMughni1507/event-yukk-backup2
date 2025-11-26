@@ -1437,6 +1437,17 @@ const HomePage = () => {
               <p className="font-poppins text-gray-600 text-xl max-w-3xl mx-auto leading-relaxed">
                 Real experiences from our <span className="font-bold text-purple-600">amazing community</span>
               </p>
+              <div className="mt-8 flex justify-center">
+                <motion.button
+                  onClick={() => navigate('/reviews')}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-full font-poppins font-semibold shadow-lg hover:shadow-xl transition-all"
+                  whileHover={{ scale: 1.05, y: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Star className="w-4 h-4" />
+                  Beri Ulasan
+                </motion.button>
+              </div>
             </div>
           </FadeInUp>
 
@@ -1505,7 +1516,18 @@ const HomePage = () => {
             <div className="text-center py-16 bg-white rounded-2xl shadow-lg">
               <div className="text-6xl mb-4">💬</div>
               <h3 className="font-bebas text-3xl text-gray-800 mb-2">No Reviews Yet</h3>
-              <p className="font-poppins text-gray-600">Be the first to share your experience!</p>
+              <p className="font-poppins text-gray-600 mb-6">
+                Be the first to share your experience!
+              </p>
+              <motion.button
+                onClick={() => navigate('/reviews')}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-full font-poppins font-semibold shadow-lg hover:shadow-xl transition-all"
+                whileHover={{ scale: 1.05, y: -2 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Star className="w-4 h-4" />
+                Tulis Ulasan
+              </motion.button>
             </div>
           )}
         </div>

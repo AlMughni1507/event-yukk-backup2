@@ -143,6 +143,8 @@ export const registrationsAPI = {
   update: (id, data) => api.put(`/registrations/${id}`, data),
   delete: (id) => api.delete(`/registrations/${id}`),
   getStats: () => api.get('/registrations/stats/overview'),
+  myRegistrations: (params) => api.get('/registrations/my-registrations', { params }),
+  checkForEvent: (eventId) => api.get(`/registrations/check/${eventId}`),
 };
 
 // Analytics API
@@ -205,6 +207,19 @@ export const adminAPI = {
   getAllEvents: (params) => api.get('/admin/events', { params }),
   getAllUsers: (params) => api.get('/admin/users', { params }),
   getAllRegistrations: (params) => api.get('/admin/registrations', { params }),
+  getAllPayments: (params) => api.get('/admin/payments', { params }),
+  getPaymentById: (id) => api.get(`/admin/payments/${id}`),
+  updateRegistrationStatus: (id, status) => api.put(`/admin/registrations/${id}/status`, { status }),
+  refundPayment: (id) => api.post(`/admin/payments/${id}/refund`),
+  verifyPayment: (orderId) => api.post(`/admin/payments/verify/${orderId}`),
+};
+
+// Payments API
+export const paymentsAPI = {
+  createTransaction: (data) => api.post('/payments/create-transaction', data),
+  getStatus: (orderId) => api.get(`/payments/status/${orderId}`),
+  verify: (orderId) => api.post(`/payments/verify/${orderId}`),
+  getHistory: (params) => api.get('/payments/history', { params }),
 };
 
 // Attendance API
@@ -231,6 +246,17 @@ export const reviewsAPI = {
   create: (data) => api.post('/reviews', data),
   update: (id, data) => api.put(`/reviews/${id}`, data),
   delete: (id) => api.delete(`/reviews/${id}`),
+};
+
+// Event Reviews API (per-event reviews)
+export const eventReviewsAPI = {
+  getByEvent: (eventId) => api.get(`/event-reviews/${eventId}`),
+  submit: (eventId, data) => api.post(`/event-reviews/${eventId}`, data),
+};
+
+// Performers API
+export const performersAPI = {
+  getByEvent: (eventId) => api.get(`/performers/event/${eventId}`)
 };
 
 export default api;

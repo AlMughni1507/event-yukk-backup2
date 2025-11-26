@@ -4,6 +4,7 @@ const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const ApiResponse = require('../middleware/response');
 const XLSX = require('xlsx');
 const TokenService = require('../services/tokenService');
+const midtransClient = require('midtrans-client');
 
 const router = express.Router();
 
@@ -337,19 +338,18 @@ router.get('/registrations', async (req, res) => {
 // Update registration status
 router.put('/registrations/:id/status', async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // This is event_registrations.id
     const { status } = req.body;
 
     if (!['pending', 'approved', 'rejected', 'cancelled', 'confirmed'].includes(status)) {
       return ApiResponse.badRequest(res, 'Invalid status');
     }
 
-    const [existingRegistrations] = await query(
+    const [eventRegs] = await query(
       `SELECT r.*, 
               u.full_name as user_full_name,
               u.email as user_email,
-              e.title as event_title,
-              e.has_certificate
+              e.title as event_title
        FROM event_registrations r
        LEFT JOIN users u ON r.user_id = u.id
        LEFT JOIN events e ON r.event_id = e.id
@@ -357,10 +357,14 @@ router.put('/registrations/:id/status', async (req, res) => {
       [id]
     );
 
-    if (existingRegistrations.length === 0) {
-      return ApiResponse.notFound(res, 'Registration not found');
+    if (eventRegs.length === 0) {
+      return ApiResponse.notFound(res, 'Event registration not found');
     }
 
+    const eventReg = eventRegs[0];
+    let tokenPayload = null;
+
+    // 1. Update event_registrations table
     await query(
       `UPDATE event_registrations 
        SET status = ?, 
@@ -370,56 +374,90 @@ router.put('/registrations/:id/status', async (req, res) => {
       [status, status, id]
     );
 
-    const registration = existingRegistrations[0];
-    let tokenPayload = null;
-
+    // 2. If approved, handle payment, token, and legacy table update
     if (['approved', 'confirmed'].includes(status)) {
-      const [existingTokens] = await query(
-        'SELECT token, expires_at FROM attendance_tokens WHERE registration_id = ? LIMIT 1',
-        [id]
+      // Find the corresponding ID in the legacy `registrations` table
+      const [legacyRegs] = await query(
+        'SELECT id FROM registrations WHERE user_id = ? AND event_id = ? ORDER BY id DESC LIMIT 1',
+        [eventReg.user_id, eventReg.event_id]
       );
 
-      if (existingTokens.length > 0) {
-        tokenPayload = {
-          token: existingTokens[0].token,
-          expiresAt: existingTokens[0].expires_at,
-        };
-      } else {
-        tokenPayload = await TokenService.createAttendanceToken(
-          id,
-          registration.user_id,
-          registration.event_id
+      if (legacyRegs.length > 0) {
+        const primaryRegistrationId = legacyRegs[0].id;
+
+        // Update legacy `registrations` table for consistency
+        await query(
+          `UPDATE registrations SET status = 'confirmed', payment_status = 'paid', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [primaryRegistrationId]
         );
-      }
 
-      const recipientEmail = registration.email || registration.user_email;
-      const recipientName = registration.full_name || registration.user_full_name || 'Peserta';
+        // Check if a payment record exists
+        const [existingPayments] = await query(
+          'SELECT id FROM payments WHERE registration_id = ?',
+          [eventReg.id] // Use event_registrations ID
+        );
 
-      if (recipientEmail) {
-        try {
-          await TokenService.sendTokenEmail(
-            recipientEmail,
-            recipientName,
-            registration.event_title || 'Event Yukk Event',
-            tokenPayload.token
+        if (existingPayments.length > 0) {
+          // If payment exists, update it using the registration_id to be certain
+          await query(
+            `UPDATE payments SET status = 'success', payment_date = CURRENT_TIMESTAMP WHERE registration_id = ?`,
+            [eventReg.id] // Use event_registrations ID
           );
-        } catch (emailError) {
-          console.error('Failed to send attendance token email:', emailError);
+        } else {
+          // If no payment record, create one for manual approval
+          const [events] = await query('SELECT price FROM events WHERE id = ?', [eventReg.event_id]);
+          const eventPrice = events.length > 0 ? events[0].price : 0;
+
+          await query(
+            'INSERT INTO payments (registration_id, order_id, amount, payment_method, status, payment_date) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+            [eventReg.id, `MANUAL-${Date.now()}-${eventReg.id}`, eventPrice, 'manual_approval', 'success'] // Use event_registrations ID
+          );
         }
+
+        // Check for existing token using the correct ID
+        const [existingTokens] = await query(
+          'SELECT token, expires_at FROM attendance_tokens WHERE registration_id = ? LIMIT 1',
+          [primaryRegistrationId]
+        );
+
+        if (existingTokens.length > 0) {
+          tokenPayload = { token: existingTokens[0].token, expiresAt: existingTokens[0].expires_at };
+        } else {
+          // Create token using the correct ID from `registrations` table
+          tokenPayload = await TokenService.createAttendanceToken(
+            primaryRegistrationId, // CORRECT ID
+            eventReg.user_id,
+            eventReg.event_id
+          );
+        }
+
+        // Send email with token
+        const recipientEmail = eventReg.user_email;
+        const recipientName = eventReg.user_full_name || 'Peserta';
+        if (recipientEmail && tokenPayload) {
+          try {
+            await TokenService.sendTokenEmail(
+              recipientEmail, recipientName, eventReg.event_title || 'Event Yukk',
+              tokenPayload.token
+            );
+          } catch (emailError) {
+            console.error('Failed to send attendance token email on admin approval:', emailError);
+          }
+        }
+      } else {
+        console.warn(`Could not find a matching primary registration for event_registrations.id ${id}. Token not generated.`);
       }
     }
 
     return ApiResponse.success(
       res,
-      {
-        token: tokenPayload?.token || null,
-        tokenExpiresAt: tokenPayload?.expiresAt || null,
-      },
+      { token: tokenPayload?.token || null, tokenExpiresAt: tokenPayload?.expiresAt || null },
       'Registration status updated successfully'
     );
+
   } catch (error) {
     console.error('Update registration status error:', error);
-    return ApiResponse.error(res, 'Failed to update registration status');
+    return ApiResponse.error(res, `Failed to update registration status: ${error.message}`);
   }
 });
 
@@ -683,6 +721,245 @@ router.get('/export/events', async (req, res) => {
   } catch (error) {
     console.error('Export events error:', error);
     return ApiResponse.error(res, 'Failed to export events data');
+  }
+});
+
+// Get all payments (Admin)
+router.get('/payments', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search = '', status = '', event_id = '' } = req.query;
+    const offset = (page - 1) * limit;
+
+    let whereClause = 'WHERE 1=1';
+    let params = [];
+
+    if (search) {
+      whereClause += ' AND (p.order_id LIKE ? OR u.full_name LIKE ? OR u.email LIKE ? OR e.title LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (status) {
+      whereClause += ' AND p.status = ?';
+      params.push(status);
+    }
+
+    if (event_id) {
+      whereClause += ' AND er.event_id = ?';
+      params.push(event_id);
+    }
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM payments p
+      LEFT JOIN event_registrations er ON p.registration_id = er.id
+      LEFT JOIN users u ON er.user_id = u.id
+      LEFT JOIN events e ON er.event_id = e.id
+      ${whereClause}
+    `;
+    const [countResult] = await query(countQuery, params);
+
+    // Get total revenue from successful payments
+    const [revenueResult] = await query(`
+      SELECT SUM(amount) as totalRevenue 
+      FROM payments 
+      WHERE status = 'success'
+    `);
+
+    // Get payments with related data
+    const dataQuery = `
+      SELECT 
+        p.*,
+        e.id as event_id,
+        e.title as event_title,
+        u.full_name as participant_name,
+        u.email as participant_email,
+        u.phone as participant_phone,
+        u.address as participant_address,
+        er.status as registration_status,
+        er.payment_status as registration_payment_status,
+        er.created_at as registration_date
+      FROM payments p
+      LEFT JOIN event_registrations er ON p.registration_id = er.id
+      LEFT JOIN users u ON er.user_id = u.id
+      LEFT JOIN events e ON er.event_id = e.id
+      ${whereClause}
+      ORDER BY p.created_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${offset}
+    `;
+    const [payments] = await query(dataQuery, params);
+
+    return ApiResponse.success(res, {
+      payments,
+      totalRevenue: revenueResult[0].totalRevenue || 0,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: countResult[0].total,
+        totalPages: Math.ceil(countResult[0].total / limit)
+      }
+    }, 'Payments retrieved successfully');
+
+  } catch (error) {
+    console.error('Get payments error:', error);
+    return ApiResponse.error(res, 'Failed to get payments');
+  }
+});
+
+// Get payment by ID (Admin)
+router.get('/payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [payments] = await query(
+      `SELECT 
+        p.*,
+        er.event_id,
+        er.status as registration_status,
+        er.payment_status as registration_payment_status,
+        er.notes,
+        er.created_at as registration_date,
+        u.full_name as participant_name,
+        u.email as participant_email,
+        u.phone as participant_phone,
+        u.address as participant_address,
+        u.id as user_id,
+        u.username,
+        e.title as event_title,
+        e.event_date,
+        e.price as event_price,
+        e.location
+       FROM payments p
+       LEFT JOIN event_registrations er ON p.registration_id = er.id
+       LEFT JOIN users u ON er.user_id = u.id
+       LEFT JOIN events e ON er.event_id = e.id
+       WHERE p.id = ?`,
+      [id]
+    );
+
+    if (payments.length === 0) {
+      return ApiResponse.notFound(res, 'Payment not found');
+    }
+
+    return ApiResponse.success(res, payments[0], 'Payment retrieved successfully');
+
+  } catch (error) {
+    console.error('Get payment error:', error);
+    return ApiResponse.error(res, 'Failed to get payment');
+  }
+});
+
+// Verify payment status from Midtrans (Admin)
+router.post('/payments/verify/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    // Get payment record with registration info
+    const [payments] = await query(
+      `SELECT p.*, er.user_id, er.event_id 
+       FROM payments p
+       LEFT JOIN event_registrations er ON p.registration_id = er.id
+       WHERE p.order_id = ?`,
+      [orderId]
+    );
+
+    if (payments.length === 0) {
+      return ApiResponse.notFound(res, 'Payment not found');
+    }
+
+    const payment = payments[0];
+
+    // Verify with Midtrans Core API
+    const isProduction = process.env.NODE_ENV === 'production' && 
+                         process.env.MIDTRANS_SERVER_KEY && 
+                         !process.env.MIDTRANS_SERVER_KEY.includes('SB-Mid-server') &&
+                         !process.env.MIDTRANS_SERVER_KEY.includes('Mid-server-');
+    const coreApi = new midtransClient.CoreApi({
+      isProduction: isProduction,
+      serverKey: process.env.MIDTRANS_SERVER_KEY
+    });
+
+    try {
+      const transaction = await coreApi.transaction.status(orderId);
+
+      // Update payment status based on Midtrans response
+      let newStatus = payment.status;
+      if (transaction.transaction_status === 'capture' || transaction.transaction_status === 'settlement') {
+        newStatus = 'success';
+        // Update registration payment status
+        if (payment.registration_id) {
+          await query('UPDATE event_registrations SET payment_status = "paid", payment_date = NOW() WHERE id = ?', [payment.registration_id]);
+        }
+      } else if (transaction.transaction_status === 'pending') {
+        newStatus = 'pending';
+      } else if (transaction.transaction_status === 'deny' || transaction.transaction_status === 'cancel' || transaction.transaction_status === 'expire') {
+        newStatus = 'failed';
+      }
+
+      // Update payment status if changed
+      if (newStatus !== payment.status) {
+        await query('UPDATE payments SET status = ?, payment_date = NOW() WHERE order_id = ?', [newStatus, orderId]);
+      }
+
+      return ApiResponse.success(res, {
+        orderId: orderId,
+        status: newStatus,
+        transactionStatus: transaction.transaction_status,
+        paymentType: transaction.payment_type,
+        grossAmount: transaction.gross_amount
+      }, 'Payment verified successfully');
+
+    } catch (midtransError) {
+      // Handle Midtrans API errors (e.g., transaction doesn't exist)
+      if (midtransError.httpStatusCode === '404') {
+        // Transaction doesn't exist in Midtrans, mark as failed
+        await query('UPDATE payments SET status = "failed" WHERE order_id = ?', [orderId]);
+        return ApiResponse.error(res, 'Transaction not found in Midtrans. Payment marked as failed.', 404);
+      }
+      throw midtransError; // Re-throw other errors
+    }
+
+  } catch (error) {
+    console.error('Verify payment error:', error);
+    return ApiResponse.error(res, 'Failed to verify payment');
+  }
+});
+
+// Refund a payment and delete the registration
+router.post('/payments/:id/refund', async (req, res) => {
+  try {
+    const { id } = req.params; // This is payments.id
+
+    // 1. Find the payment and registration details
+    const [payments] = await query('SELECT * FROM payments WHERE id = ?', [id]);
+    if (payments.length === 0) {
+      return ApiResponse.notFound(res, 'Payment not found');
+    }
+    const payment = payments[0];
+
+    // 2. Update payment status to 'refunded'
+    await query(`UPDATE payments SET status = 'refunded' WHERE id = ?`, [id]);
+
+    // 3. Delete the associated registration data
+    const primaryRegistrationId = payment.registration_id;
+    if (primaryRegistrationId) {
+      const [eventRegs] = await query('SELECT user_id, event_id FROM event_registrations WHERE id = ?', [primaryRegistrationId]);
+      if (eventRegs.length > 0) {
+        const { user_id, event_id } = eventRegs[0];
+
+        // Delete from all related tables
+        await query('DELETE FROM attendance_tokens WHERE registration_id = ?', [primaryRegistrationId]);
+        await query('DELETE FROM event_registrations WHERE id = ?', [primaryRegistrationId]);
+        // Also delete from registrations table if exists
+        await query('DELETE FROM registrations WHERE user_id = ? AND event_id = ?', [user_id, event_id]);
+      }
+    }
+
+    return ApiResponse.success(res, null, 'Payment refunded and registration deleted successfully');
+
+  } catch (error) {
+    console.error('Refund payment error:', error);
+    return ApiResponse.error(res, 'Failed to refund payment');
   }
 });
 

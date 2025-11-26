@@ -18,7 +18,8 @@ import {
   Menu,
   X,
   Bell,
-  Settings
+  Settings,
+  CreditCard
 } from 'lucide-react';
 
 const AdminLayout = () => {
@@ -176,6 +177,13 @@ const AdminLayout = () => {
       icon: MessageSquare,
       path: '/admin/contacts',
       description: 'Contact Management'
+    },
+    {
+      id: 'payments',
+      label: 'Payments',
+      icon: CreditCard,
+      path: '/admin/payments',
+      description: 'Payment Management'
     }
   ];
 

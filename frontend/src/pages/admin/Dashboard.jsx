@@ -149,10 +149,22 @@ const Dashboard = () => {
         analyticsAPI.getTopEvents()
       ]);
 
+      // Response interceptor returns { success, message, data }
+      // So response.data contains { monthlyEvents: [...] }
+      const monthlyEvents = monthlyEventsRes?.data?.monthlyEvents || monthlyEventsRes?.monthlyEvents || [];
+      const monthlyParticipants = monthlyParticipantsRes?.data?.monthlyParticipants || monthlyParticipantsRes?.monthlyParticipants || [];
+      const topEvents = topEventsRes?.data?.topEvents || topEventsRes?.topEvents || [];
+
+      console.log('📊 Charts data loaded:', {
+        monthlyEvents: monthlyEvents.length,
+        monthlyParticipants: monthlyParticipants.length,
+        topEvents: topEvents.length
+      });
+
       setChartsData({
-        monthlyEvents: monthlyEventsRes.data?.monthlyEvents || monthlyEventsRes?.monthlyEvents || [],
-        monthlyParticipants: monthlyParticipantsRes.data?.monthlyParticipants || monthlyParticipantsRes?.monthlyParticipants || [],
-        topEvents: topEventsRes.data?.topEvents || topEventsRes?.topEvents || []
+        monthlyEvents: Array.isArray(monthlyEvents) ? monthlyEvents : [],
+        monthlyParticipants: Array.isArray(monthlyParticipants) ? monthlyParticipants : [],
+        topEvents: Array.isArray(topEvents) ? topEvents : []
       });
     } catch (error) {
       console.error('❌ Error fetching charts data:', error);

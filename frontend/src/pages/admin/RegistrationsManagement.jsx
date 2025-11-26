@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useToast } from '../../contexts/ToastContext';
 import ConfirmModal from '../../components/ConfirmModal';
 import { ClipboardList, FileText, Search, Filter, CheckCircle, XCircle, Clock, Award, Download, FileSpreadsheet, Trash2, Trophy, AlertCircle, Ban } from 'lucide-react';
-import { registrationsAPI, eventsAPI, certificatesAPI } from '../../services/api';
+import { registrationsAPI, eventsAPI, certificatesAPI, adminAPI } from '../../services/api';
 
 const RegistrationsManagement = () => {
   const toast = useToast();
@@ -87,7 +87,7 @@ const RegistrationsManagement = () => {
 
   const handleStatusUpdate = async (registrationId, newStatus) => {
     try {
-      await registrationsAPI.update(registrationId, { status: newStatus });
+      await adminAPI.updateRegistrationStatus(registrationId, newStatus);
       toast.success('Status registrasi berhasil diupdate!');
       fetchRegistrations();
     } catch (error) {
