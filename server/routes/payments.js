@@ -17,8 +17,8 @@ const isProduction = process.env.NODE_ENV === 'production' &&
 
 const snap = new midtransClient.Snap({
   isProduction: isProduction,
-  serverKey: process.env.MIDTRANS_SERVER_KEY || 'Mid-server-U3uWmOllZ_9x58IMuxkaUQK2',
-  clientKey: process.env.MIDTRANS_CLIENT_KEY || 'Mid-client-nvTDykDDeGssFvsV'
+  serverKey: process.env.MIDTRANS_SERVER_KEY || '',
+  clientKey: process.env.MIDTRANS_CLIENT_KEY || ''
 });
 
 console.log('💳 Midtrans initialized:', {
